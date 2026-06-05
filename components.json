@@ -1,0 +1,269 @@
+import { useEffect, useState } from "react";
+import { SunLogo } from "@/components/SunLogo";
+import { useNavigate } from "react-router-dom";
+import { z } from "zod";
+import { ArrowLeft, ArrowRight, Check, Heart } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
+import { toast } from "@/hooks/use-toast";
+
+type Gender = "male" | "female";
+type Marital = "divorced" | "widowed" | "separated";
+type Custody = "full" | "shared" | "partial" | "none";
+
+const CITIES = ["Dakar", "Thiès", "Saint-Louis", "Touba", "Kaolack", "Ziguinchor", "Mbour", "Rufisque", "Diourbel", "Autre"];
+const LANGUAGES = ["Français", "Wolof", "Pulaar", "Sérère", "Diola", "Mandingue", "Anglais", "Arabe"];
+const RELIGIONS = ["Musulman·e", "Chrétien·ne", "Autre", "Préfère ne pas dire"];
+
+const schema = z.object({
+  full_name: z.string().trim().min(2).max(100),
+  birth_date: z.string().min(1, "Date requise"),
+  gender: z.enum(["male", "female"]),
+  city: z.string().min(1),
+  languages: z.array(z.string()).min(1, "Sélectionnez au moins une langue"),
+  marital_status: z.enum(["divorced", "widowed", "separated"]),
+  religion: z.string().min(1),
+  education: z.string().max(120).optional(),
+  profession: z.string().max(120).optional(),
+  children_count: z.number().int().min(0).max(15),
+  co_parenting_situation: z.enum(["full", "shared", "partial", "none"]),
+  bio: z.string().max(600).optional(),
+});
+
+export default function Onboarding() {
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  const [step, setStep] = useState(0);
+  const [busy, setBusy] = useState(false);
+
+  const [full_name, setFullName] = useState("");
+  const [birth_date, setBirthDate] = useState("");
+  const [gender, setGender] = useState<Gender | "">("");
+  const [city, setCity] = useState("");
+  const [languages, setLanguages] = useState<string[]>([]);
+  const [marital_status, setMarital] = useState<Marital | "">("");
+  const [religion, setReligion] = useState("");
+  const [education, setEducation] = useState("");
+  const [profession, setProfession] = useState("");
+  const [children_count, setChildrenCount] = useState(0);
+  const [co_parenting_situation, setCustody] = useState<Custody | "">("");
+  const [bio, setBio] = useState("");
+
+  useEffect(() => {
+    if (!loading && !user) { navigate("/auth", { replace: true }); return; }
+    if (user) {
+      supabase.from("profiles").select("*").eq("id", user.id).maybeSingle().then(({ data }) => {
+        if (data) {
+          setFullName(data.full_name ?? "");
+          setBirthDate(data.birth_date ?? "");
+          setGender((data.gender as Gender) ?? "");
+          setCity(data.city ?? "");
+          setLanguages(data.languages ?? []);
+          setMarital((data.marital_status as Marital) ?? "");
+          setReligion(data.religion ?? "");
+          setEducation(data.education ?? "");
+          setProfession(data.profession ?? "");
+          setChildrenCount(data.children_count ?? 0);
+          setCustody((data.co_parenting_situation as Custody) ?? "");
+          setBio(data.bio ?? "");
+          if (data.onboarding_completed) navigate("/profile", { replace: true });
+        }
+      });
+    }
+  }, [user, loading, navigate]);
+
+  const steps = ["Vous", "Origine", "Histoire", "Enfants", "Présentation"];
+  const progress = ((step + 1) / steps.length) * 100;
+
+  const toggleLang = (l: string) =>
+    setLanguages((prev) => prev.includes(l) ? prev.filter((x) => x !== l) : [...prev, l]);
+
+  const next = () => setStep((s) => Math.min(s + 1, steps.length - 1));
+  const prev = () => setStep((s) => Math.max(s - 1, 0));
+
+  const handleSave = async () => {
+    if (!user) return;
+    const parsed = schema.safeParse({
+      full_name, birth_date, gender, city, languages, marital_status, religion,
+      education, profession, children_count, co_parenting_situation, bio,
+    });
+    if (!parsed.success) {
+      toast({ title: "Profil incomplet", description: parsed.error.errors[0].message, variant: "destructive" });
+      return;
+    }
+    setBusy(true);
+    const { error } = await supabase.from("profiles").update({
+      ...parsed.data,
+      onboarding_completed: true,
+    }).eq("id", user.id);
+    setBusy(false);
+    if (error) {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Profil créé 🎉", description: "Bienvenue dans Yeesal." });
+    navigate("/profile");
+  };
+
+  if (loading) return <div className="min-h-screen flex items-center justify-center">Chargement...</div>;
+
+  return (
+    <main className="min-h-screen bg-gradient-sunset px-4 py-10">
+      <div className="max-w-xl mx-auto">
+        <div className="flex items-center justify-center gap-2.5 mb-6">
+          <SunLogo size={40} />
+          <span className="font-display text-xl font-semibold">Yee<span className="text-primary">sal</span></span>
+        </div>
+
+        <div className="bg-card rounded-3xl shadow-elegant border border-border p-6 sm:p-8">
+          <div className="mb-6">
+            <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
+              <span>Étape {step + 1} sur {steps.length}</span>
+              <span>{steps[step]}</span>
+            </div>
+            <Progress value={progress} className="h-1.5" />
+          </div>
+
+          {step === 0 && (
+            <div className="space-y-4">
+              <h2 className="font-display text-2xl font-semibold">Faisons connaissance</h2>
+              <div className="space-y-1.5">
+                <Label htmlFor="fn">Nom complet</Label>
+                <Input id="fn" value={full_name} onChange={(e) => setFullName(e.target.value)} maxLength={100} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="bd">Date de naissance</Label>
+                <Input id="bd" type="date" value={birth_date} onChange={(e) => setBirthDate(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Genre</Label>
+                <RadioGroup value={gender} onValueChange={(v) => setGender(v as Gender)} className="grid grid-cols-2 gap-3">
+                  <Label className="flex items-center gap-2 p-3 border border-border rounded-xl cursor-pointer hover:bg-muted">
+                    <RadioGroupItem value="female" /> Femme
+                  </Label>
+                  <Label className="flex items-center gap-2 p-3 border border-border rounded-xl cursor-pointer hover:bg-muted">
+                    <RadioGroupItem value="male" /> Homme
+                  </Label>
+                </RadioGroup>
+              </div>
+            </div>
+          )}
+
+          {step === 1 && (
+            <div className="space-y-4">
+              <h2 className="font-display text-2xl font-semibold">D'où venez-vous ?</h2>
+              <div className="space-y-1.5">
+                <Label>Ville</Label>
+                <Select value={city} onValueChange={setCity}>
+                  <SelectTrigger><SelectValue placeholder="Sélectionnez une ville" /></SelectTrigger>
+                  <SelectContent>{CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Langues parlées</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {LANGUAGES.map((l) => (
+                    <Label key={l} className="flex items-center gap-2 p-2.5 border border-border rounded-lg cursor-pointer hover:bg-muted text-sm">
+                      <Checkbox checked={languages.includes(l)} onCheckedChange={() => toggleLang(l)} /> {l}
+                    </Label>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Religion</Label>
+                <Select value={religion} onValueChange={setReligion}>
+                  <SelectTrigger><SelectValue placeholder="Sélectionnez" /></SelectTrigger>
+                  <SelectContent>{RELIGIONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-4">
+              <h2 className="font-display text-2xl font-semibold">Votre histoire</h2>
+              <div className="space-y-2">
+                <Label>Situation</Label>
+                <RadioGroup value={marital_status} onValueChange={(v) => setMarital(v as Marital)} className="space-y-2">
+                  {[
+                    { v: "divorced", l: "Divorcé·e" },
+                    { v: "widowed", l: "Veuf·ve" },
+                    { v: "separated", l: "Séparé·e" },
+                  ].map((o) => (
+                    <Label key={o.v} className="flex items-center gap-2 p-3 border border-border rounded-xl cursor-pointer hover:bg-muted">
+                      <RadioGroupItem value={o.v} /> {o.l}
+                    </Label>
+                  ))}
+                </RadioGroup>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edu">Éducation (optionnel)</Label>
+                <Input id="edu" value={education} onChange={(e) => setEducation(e.target.value)} placeholder="Master, Licence, BFEM..." maxLength={120} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="prof">Profession (optionnel)</Label>
+                <Input id="prof" value={profession} onChange={(e) => setProfession(e.target.value)} placeholder="Enseignante, commerçant..." maxLength={120} />
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4">
+              <h2 className="font-display text-2xl font-semibold">Vos enfants</h2>
+              <p className="text-sm text-muted-foreground">Cette information aide à proposer des profils respectueux de votre vie de famille.</p>
+              <div className="space-y-1.5">
+                <Label htmlFor="cc">Nombre d'enfants</Label>
+                <Input id="cc" type="number" min={0} max={15} value={children_count} onChange={(e) => setChildrenCount(parseInt(e.target.value) || 0)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Situation de garde</Label>
+                <RadioGroup value={co_parenting_situation} onValueChange={(v) => setCustody(v as Custody)} className="space-y-2">
+                  {[
+                    { v: "full", l: "Garde complète" },
+                    { v: "shared", l: "Garde partagée" },
+                    { v: "partial", l: "Garde partielle" },
+                    { v: "none", l: "Pas de garde / autre" },
+                  ].map((o) => (
+                    <Label key={o.v} className="flex items-center gap-2 p-3 border border-border rounded-xl cursor-pointer hover:bg-muted">
+                      <RadioGroupItem value={o.v} /> {o.l}
+                    </Label>
+                  ))}
+                </RadioGroup>
+              </div>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="space-y-4">
+              <h2 className="font-display text-2xl font-semibold">Présentez-vous</h2>
+              <p className="text-sm text-muted-foreground">Quelques mots sincères. Ce que vous recherchez, ce qui vous fait vibrer.</p>
+              <Textarea value={bio} onChange={(e) => setBio(e.target.value)} maxLength={600} rows={7} placeholder="Maman de deux enfants merveilleux, j'aime la mer, les ceebu-jen du dimanche..." />
+              <p className="text-xs text-muted-foreground text-right">{bio.length}/600</p>
+            </div>
+          )}
+
+          <div className="mt-8 flex items-center justify-between gap-3">
+            <Button type="button" variant="ghost" onClick={prev} disabled={step === 0}>
+              <ArrowLeft className="h-4 w-4" /> Retour
+            </Button>
+            {step < steps.length - 1 ? (
+              <Button type="button" variant="hero" onClick={next}>Continuer <ArrowRight className="h-4 w-4" /></Button>
+            ) : (
+              <Button type="button" variant="hero" onClick={handleSave} disabled={busy}>
+                {busy ? "Enregistrement..." : <>Terminer <Check className="h-4 w-4" /></>}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
